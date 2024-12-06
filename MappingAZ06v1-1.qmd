@@ -1,0 +1,359 @@
+---
+title: "MappingAZ06"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+To start with, load the packages we need.
+
+```{r chunk01, results='hide'}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+```
+
+Define the common directory where we'll save local copies of the things we might want to use in other notebooks.
+
+```{r chunk02}
+my_data_dir <- rappdirs::user_data_dir(appauthor = "cindyhood", appname = "Mapping_az06")
+if (!dir.exists(my_data_dir)) dir.create(my_data_dir, recursive = TRUE)
+tools::file_path_as_absolute(my_data_dir)
+
+```
+
+Load the shapefile with the Arizona Congressional district boundaries that we downloaded from redistrictingdatahub.org
+
+```{r chunk03, cache = TRUE}
+az_congdst_sf <- sf::st_read("~/Downloads/az_cong_adopted_2022/Approved_Official_Congressional_Map.shp")
+
+
+names(az_congdst_sf)
+str(az_congdst_sf)
+
+nrow(az_congdst_sf)
+head(az_congdst_sf)
+
+```
+
+Given that we know that Arizona currently has 9 districts, this appears to be consistent.
+
+Let's plot the district boundaries using the geometries we just loaded from the shapefile
+
+```{r chunk04, cache = TRUE}
+ggplot(az_congdst_sf) + 
+  geom_sf() + 
+  labs(title = "Arizona Congressional Districts, 2022")
+
+```
+
+Let's pull the AZ-06 district geometries
+
+```{r chunk05, cache = TRUE}
+az_congdst_sf$district <- c(1, 2, 3, 4, 5, 6, 7, 8, 9) # Replace with actual district numbers
+
+az06 <- dplyr::filter(az_congdst_sf, district == 6)
+st_crs(az_congdst_sf)
+print("-----")
+st_crs(az06)
+
+```
+
+Let's plot AZ-06
+
+```{r chunk06, cache = TRUE}
+ggplot(az06) + 
+  geom_sf() + 
+  labs(title = "Arizona Congressional District 6")
+
+```
+
+We are interested in the precinct boundaries. Now load the shapefile with the Illinois precinct boundaries that we downloaded from redistrictingdatahub.org
+
+```{r chunk07, cache = TRUE}
+az_prec_2022_sf <- sf::st_read("~/Downloads/az_2022_gen_prec/az_2022_gen_prec.shp")
+st_crs(az_prec_2022_sf)
+nrow(az_prec_2022_sf)
+head(az_prec_2022_sf)
+
+```
+
+Let's look at all the column names in this table to see what's in the table
+
+```{r chunk08, cache = TRUE}
+
+names(az_prec_2022_sf)
+
+```
+
+From the README.txt, here is how the field/column names are coded:
+
+## Notes on Field Names (adapted from VEST):
+
+Columns reporting votes generally follow the pattern: One example is: G16PREDCLI The first character is G for a general election, P for a primary, S for a special, and R for a runoff. Characters 2 and 3 are the year of the election.\* Characters 4-6 represent the office type (see list below). Character 7 represents the party of the candidate. Characters 8-10 are the first three letters of the candidate's last name.
+
+\*To fit within the GIS 10 character limit for field names, the naming convention is slightly different for the State Legislature and US House of Representatives. All fields are listed below with definitions.
+
+Office Codes Used: A - Amendment ATG - Attorney General COM - Comptroller CON## - United States Congress GOV - Governor and Lieutenant Governor SC# - Supreme Court Seat \# (both elections and retention) SL### - State House SOS - Secretary of State TRE - Treasurer SU## - State Senate USS - United States Senator
+
+Party Codes Used: D - Democratic I - Independent L - Libertarian Party O - Other / Write In R - Republican W - Working Class Party
+
+## Fields:
+
+Field Name Description UNIQUE_ID State FIP Value COUNYFP County FIP Value County County Name Precinct Precinct Name CONG_DIST Congressional District
+
+```{r chunk09, cache = TRUE}
+az06_prec <- dplyr::filter(az_prec_2022_sf, CONG_DIST == 6)
+st_crs(az06_prec)
+head(az06_prec)
+```
+
+```{r chunk10, cache = TRUE}
+az06_prec_sel <- az06_prec %>% select(UNIQUE_ID,
+                                      COUNTYFP,
+                                      COUNTY_NAM,
+                                      PCTNUM,
+                                      CONG_DIST,
+                                      GCON06DENG,
+                                      GCON06OWRI,
+                                      GCON06RCIS,
+                                      geometry)
+head(az06_prec_sel)
+
+```
+
+```{r chunk11, cache = TRUE}
+print("----")
+st_crs(az06_prec_sel)
+print("xxxxx")
+#head(az06_prec_sel)
+st_crs(az06)
+#head(az_congdst_sf)
+#st_crs(az_congdst_sf)
+#az06_prec_sel_wgs84 <- st_transform(az06_prec_sel, crs = 4326)
+#az06 <- st_set_crs(az06, 4269)
+#az06_84_u <- st_transform(az06, st_crs(az06_prec_sel))
+ggplot(az06_prec_sel) + 
+  geom_sf() + 
+  geom_sf(data = az06_84_u, fill = NA, lwd = 1.2) +
+  labs(title = "Precincts in Arizona Congressional District 6")
+
+```
+
+This map does appear to have some precincts that extend outside of the AZ-6 Congressional district boundary. This needs further investigation.
+
+From the README.txt: Certain precincts are split by congressional or legislative districts and have votes for more than one district. These precincts are split by the district geographies. In certain cases, votes appear in precincts for districts that do not intersect with the precinct itself. In the split precinct files, these votes are "lost" and not included in the resulting file. For the SLDL file, 49 votes were lost, for the SLDU file, 44 votes were lost and for the congressional file, 29 votes were lost. The geographies of these precincts with lost votes were double-checked to ensure it was not a processing error on our end.
+
+The above confirms that precincts can be split by congressional districts so the map reflects this.
+
+```{r chunk12, cache = TRUE}
+az06_prec_win <- az06_prec_sel %>% mutate(
+  Winner = case_when (
+    GCON06DENG > GCON06RCIS ~ "D",
+    GCON06DENG < GCON06RCIS ~ "R",
+    TRUE ~ "T") )
+
+head(az06_prec_win)
+
+```
+
+We have a few ties. One with no votes that might need investigation and another with each side getting 125 votes.
+
+Lets maps the winners
+
+```{r chunk13, cache = TRUE}
+ggplot(az06_prec_win, aes(color = Winner)) + 
+  geom_sf() + 
+  scale_color_manual(values = c("D" = "blue",
+                                "R" = "red",
+                                "T" = "green"))
+  
+
+
+```
+
+```{r chunk14, cache = TRUE}
+ggplot(az06_prec_win, aes(fill = Winner)) + 
+  geom_sf() 
+
+```
+
+```{r chunk15, cache = TRUE}
+ggplot(az06_prec_win, aes(fill = Winner)) + 
+  geom_sf() + 
+  scale_fill_manual(values = c("D" = "blue",
+                                "R" = "red",
+                                "T" = "green"))
+
+
+```
+
+```{r chunk16, cache = TRUE}
+ggplot(az06_prec_win, aes(fill = Winner, color = "white")) + 
+  geom_sf() + 
+  scale_fill_manual(values = c("D" = "blue",
+                                "R" = "red",
+                                "T" = "green"))
+  
+
+```
+
+```{r chunk16, cache = TRUE}
+ggplot(az06_prec_win, aes(fill = Winner)) + 
+  geom_sf() + 
+  scale_fill_manual(values = c("D" = "blue",
+                                "R" = "red",
+                                "T" = "green"))+
+  geom_sf(data = az06, fill = NA, lwd = 0.8) +
+  labs(title = "2022 AZ Cong District 6 Election Results by Precinct")
+```
+
+```{r chunk17 cache=TRUE}
+totalDvotes <- sum(az06_prec_win$GCON06DENG)
+totalRvotes <- sum(az06_prec_win$GCON06RCIS)
+totalOvotes <- sum(az06_prec_win$GCON06OWRI)
+cat(totalDvotes, "votes for the Democrat\n")
+cat(totalRvotes, "votes for the Republican\n")
+cat(totalOvotes, "votes for others\n")
+
+```
+
+```{r chunk 18}
+library(readr)
+```
+
+```{r chunk19}
+selected_columns <- az_prec_2022_sf %>%
+  select(UNIQUE_ID, COUNTYFP, COUNTY_NAM, PCTNUM, G22USSDKEL, G22USSLVIC, G22USSOWRI, G22USSRMAS, G22USSWWRI)
+
+az_prec_table <- st_drop_geometry(selected_columns)
+
+#il_prec_data_tbl <- readr::read_csv("~/Downloads/il_2022_gen_prec_data/il_2022_gen_prec.csv",
+#                             col_select = c(
+#                               UNIQUE_ID,
+#                               COUNTYFP,
+#                               County,
+#                               Precinct,
+#                               G22USSDDUC,
+#                               G22USSLRED,
+#                               G22USSOWRI,
+#                               G22USSRSAL),
+#                             show_col_types = FALSE)
+
+dim(az_prec_table)
+az_prec_table |> head()
+```
+
+```{r chunk20}
+az_prec_win_sen <- az06_prec_win |> 
+  left_join(az_prec_table, by = c("UNIQUE_ID" )) |> 
+  select(UNIQUE_ID,
+         starts_with("G"))
+az_prec_win_sen
+```
+
+```{r chunk21, cache = TRUE}
+az06_prec_cong_sen_win <- az_prec_win_sen %>% mutate(
+  CWinner = case_when (
+     GCON06DENG > GCON06RCIS~ "D",
+     GCON06DENG < GCON06RCIS ~ "R",
+    TRUE ~ "T"), SWinner = case_when (
+      G22USSDKEL  > G22USSRMAS ~ "D",
+      G22USSDKEL  < G22USSRMAS ~ "R",
+      TRUE ~ "T") )
+
+head(az06_prec_cong_sen_win)
+```
+
+```{r}
+library(patchwork)
+```
+
+```{r chunk22, cache = TRUE}
+g1 <- ggplot(az06_prec_cong_sen_win, aes(fill = CWinner)) + 
+  geom_sf() + 
+  scale_fill_manual(values = c("D" = "blue",
+                                "R" = "red",
+                                "T" = "green"))+
+  geom_sf(data = az06, fill = NA, lwd = 0.8) +
+  labs(title = "2022 AZ06 Cong Election by Precinct")+
+  theme_void()
+
+g2 <- ggplot(az06_prec_cong_sen_win, aes(fill = SWinner)) + 
+  geom_sf() + 
+  scale_fill_manual(values = c("D" = "blue",
+                                "R" = "red",
+                                "T" = "green"))+
+  geom_sf(data = az06, fill = NA, lwd = 0.8) +
+  labs(title = "2022 AZ06 Senate Election by Precinct")+
+  theme_void()
+
+## Display them side-by-side
+g1 | g2
+```
+
+```{r chunk23 cache=TRUE}
+totalCDvotes <- sum(az06_prec_cong_sen_win$GCON06DENG)
+totalCRvotes <- sum(az06_prec_cong_sen_win$GCON06RCIS)
+totalCOvotes <- sum(az06_prec_cong_sen_win$GCON06OWRI)
+totalSDvotes <- sum(az06_prec_cong_sen_win$G22USSDKEL, na.rm = TRUE)
+totalSRvotes <- sum(az06_prec_cong_sen_win$G22USSRMAS, na.rm = TRUE)
+#totalSLvotes <- sum(az06_prec_cong_sen_win$G22USSLRED, na.rm = TRUE)
+totalSOvotes <- sum(az06_prec_cong_sen_win$G22USSOWRI, na.rm = TRUE)
+cat(totalCDvotes, "votes for the Democratic AZ-06 Congressional District Candidate\n")
+cat(totalCRvotes, "votes for the Republican AZ-06 Congressional District Candidate\n")
+cat(totalCOvotes, "votes for others in the AZ-06 Congressional District Election\n")
+cat(totalSDvotes, "votes for the Democratic Candidate for Senate\n")
+cat(totalSRvotes, "votes for the Republican Candidate for Senate\n")
+cat(totalSLvotes, "votes for the Libertarian Candidate for Senate\n")
+cat(totalSOvotes, "votes for others in the Senate Election\n")
+totalCvotes <- totalCDvotes + totalCRvotes + totalCOvotes
+cat(totalCvotes, "total votes for AZ-06 Congressional Representative\n")
+totalSvotes <- totalSDvotes + totalSRvotes + totalSLvotes + totalSOvotes
+cat(totalSvotes, "total votes IL Senator")
+```
+
+```{r chunk 23, cache=TRUE}
+az06_prec_winper <- az06_prec_win %>% mutate(
+  Dper = GCON06DENG/(GCON06DENG+GCON06RCIS+GCON06OWRI),
+  Rper = GCON06RCIS/(GCON06DENG+GCON06RCIS+GCON06OWRI)
+     )
+az06_prec_winper[["Dper"]][is.nan(az06_prec_winper[["Dper"]])] <- 0
+az06_prec_winper[["Rper"]][is.nan(az06_prec_winper[["Rper"]])] <- 0
+```
+
+```{r chunk24, cache=TRUE}
+g3 = ggplot(az06_prec_winper, aes(fill = Dper)) +
+  geom_sf() +
+  scale_fill_distiller(palette = "Blues", direction = 1) +
+  labs(title = "Fraction of votes for the Democrat", 
+       subtitle = "AZ Cong District 06 2022",
+       fill = "Fraction") +
+  theme_void()
+
+g4 = ggplot(az06_prec_winper, aes(fill = Rper)) +
+  geom_sf() +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  labs(title = "Fraction of votes for the Republican", 
+       subtitle = "AZ Cong District 06 2022",
+       fill = "Fraction") +
+  theme_void()
+
+g3|g4
+```
+
+```{r chunk23, cache = TRUE}
+il_prec_2020_sf <- sf::st_read("il_vest_20/il_vest_20.shp")
+
+nrow(il_prec_2020_sf)
+head(il_prec_2020_sf)
+```
+
+```{r chunk24, cache = TRUE}
+```
+
+\`\`\`{r chunk24, cache = TRUE}
